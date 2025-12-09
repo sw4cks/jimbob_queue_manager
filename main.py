@@ -17,6 +17,13 @@ db = QueueDatabase()
 # Single embed color used across all bot messages
 EMBED_COLOR = discord.Color(0xffc100)
 
+VALID_CATEGORIES = {'show', 'movie', 'anime'}
+USAGE_MESSAGES = {
+    'setupqueue': "Usage: !setupqueue <show|movie|anime>",
+    'resetqueue': "Usage: !resetqueue <show|movie|anime>",
+    'remove': "Usage: !remove <id>"
+}
+
 # Store queue message references for each category
 queue_messages = {
     'show': None,
@@ -117,6 +124,23 @@ async def on_message(message):
         await update_queue_embed('anime')
     await bot.process_commands(message)
 
+@bot.event
+async def on_command_error(ctx, error):
+    """Return usage hints when required parameters are missing or invalid."""
+    usage = USAGE_MESSAGES.get(getattr(ctx.command, "name", ""), None)
+    
+    if isinstance(error, commands.MissingRequiredArgument):
+        if usage:
+            await ctx.send(f"❌ Incorrect usage. {usage}")
+            return
+    if isinstance(error, commands.BadArgument):
+        if usage:
+            await ctx.send(f"❌ Incorrect usage. {usage}")
+            return
+    
+    # Re-raise unhandled errors so they don't fail silently
+    raise error
+
 @bot.command()
 async def undo(ctx):
     """Undo your last queue entry"""
@@ -145,13 +169,7 @@ async def help(ctx):
         value="Remove your last added request\n*Example: !undo*",
         inline=False
     )
-    
-    embed.add_field(
-        name="!stats",
-        value="View queue statistics and your contributions\n*Example: !stats*",
-        inline=False
-    )
-    
+
     embed.add_field(
         name="!remove <id>",
         value="Mark an item as completed\n*Example: !remove 5*",
@@ -191,26 +209,22 @@ async def helpadmin(ctx):
     )
     
     await ctx.send(embed=embed)
-    """Display queue statistics"""
-    stats = db.get_queue_stats()
-    user_stats = db.get_user_stats(str(ctx.author.id))
-    
-    embed = discord.Embed(title="📊 Queue Statistics", color=EMBED_COLOR)
-    embed.add_field(name="Pending Items", value=stats.get('pending', 0), inline=True)
-    embed.add_field(name="Completed Items", value=stats.get('completed', 0), inline=True)
-    
-    if stats.get('by_category'):
-        categories = '\n'.join([f"**{cat}**: {count}" for cat, count in stats['by_category'].items()])
-        embed.add_field(name="By Category", value=categories, inline=False)
-    
-    if user_stats:
-        embed.add_field(name="Your Contributions", value=f"**{user_stats[1]}** items added", inline=False)
-    
-    await ctx.send(embed=embed)
 
 @bot.command()
 async def remove(ctx, item_id: int):
     """Remove an item from the queue (completed)"""
+    item = db.get_item(item_id)
+    if not item:
+        await ctx.send(f"❌ Could not find item #{item_id}")
+        return
+    
+    added_by = item[3]
+    is_admin = ctx.author.guild_permissions.administrator
+    
+    if not is_admin and added_by != str(ctx.author.id):
+        await ctx.send("❌ You can't remove a request that isn't yours.")
+        return
+    
     if db.remove_from_queue(item_id):
         await ctx.send(f"✅ Item #{item_id} marked as completed!")
         await update_queue_embed()
@@ -224,8 +238,8 @@ async def setupqueue(ctx, category: str):
     global queue_messages, queue_channels
     
     category = category.lower()
-    if category not in ['show', 'movie', 'anime']:
-        await ctx.send("❌ Category must be: show, movie, or anime")
+    if category not in VALID_CATEGORIES:
+        await ctx.send(f"❌ Incorrect usage. {USAGE_MESSAGES['setupqueue']}")
         return
     
     queue_channels[category] = ctx.channel
@@ -254,34 +268,31 @@ async def setrequestschannel(ctx):
 
 @bot.command()
 @commands.has_permissions(administrator=True)
-async def resetqueue(ctx, category: str = None):
-    """Reset queue embed(s) - specify show/movie/anime or leave blank to reset one (owner only)"""
+async def resetqueue(ctx, category: str):
+    """Reset a queue embed for a specific category (owner only)"""
     global queue_messages, queue_channels
     
-    if category:
-        category = category.lower()
-        if category not in ['show', 'movie', 'anime']:
-            await ctx.send("❌ Category must be: show, movie, or anime")
-            return
+    category = category.lower()
+    if category not in VALID_CATEGORIES:
+        await ctx.send(f"❌ Incorrect usage. {USAGE_MESSAGES['resetqueue']}")
+        return
+    
+    queue_messages[category] = None
+    queue_channels[category] = None
+    
+    # Remove from .env
+    try:
+        with open('.env', 'r') as f:
+            lines = f.readlines()
         
-        queue_messages[category] = None
-        queue_channels[category] = None
-        
-        # Remove from .env
-        try:
-            with open('.env', 'r') as f:
-                lines = f.readlines()
-            
-            with open('.env', 'w') as f:
-                for line in lines:
-                    if not line.startswith(f'QUEUE_{category.upper()}_'):
-                        f.write(line)
-        except:
-            pass
-        
-        await ctx.send(f"✅ {category.capitalize()} queue embed reset! Run `!setupqueue {category}` in the new channel.")
-    else:
-        await ctx.send("❌ Please specify a category: show, movie, or anime\nExample: `!resetqueue show`")
+        with open('.env', 'w') as f:
+            for line in lines:
+                if not line.startswith(f'QUEUE_{category.upper()}_'):
+                    f.write(line)
+    except:
+        pass
+    
+    await ctx.send(f"✅ {category.capitalize()} queue embed reset! Run `!setupqueue {category}` in the new channel.")
 
 @bot.command()
 @commands.has_permissions(administrator=True)

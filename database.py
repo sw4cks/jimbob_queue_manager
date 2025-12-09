@@ -114,6 +114,25 @@ class QueueDatabase:
             print(f"Error removing from queue: {e}")
             return False
     
+    def get_item(self, item_id: int):
+        """Fetch a single queue item by id"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                SELECT id, title, category, added_by, status
+                FROM queue
+                WHERE id = ?
+            ''', (item_id,))
+            
+            result = cursor.fetchone()
+            conn.close()
+            return result
+        except Exception as e:
+            print(f"Error fetching item: {e}")
+            return None
+    
     def undo_last_entry(self, user_id: str) -> Tuple:
         """Remove the last entry added by a user and return the item info"""
         try:
