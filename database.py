@@ -114,6 +114,26 @@ class QueueDatabase:
             print(f"Error removing from queue: {e}")
             return False
     
+    def clear_queue(self, category: str) -> int:
+        """Mark all pending items in a category as completed. Returns count cleared."""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                UPDATE queue
+                SET status = 'completed'
+                WHERE status = 'pending' AND category = ?
+            ''', (category,))
+            
+            cleared = cursor.rowcount
+            conn.commit()
+            conn.close()
+            return cleared
+        except Exception as e:
+            print(f"Error clearing queue: {e}")
+            return 0
+    
     def get_item(self, item_id: int):
         """Fetch a single queue item by id"""
         try:

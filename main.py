@@ -21,7 +21,8 @@ VALID_CATEGORIES = {'show', 'movie', 'anime'}
 USAGE_MESSAGES = {
     'setupqueue': "Usage: !setupqueue <show|movie|anime>",
     'resetqueue': "Usage: !resetqueue <show|movie|anime>",
-    'remove': "Usage: !remove <position> <show|movie|anime>"
+    'remove': "Usage: !remove <positions> <show|movie|anime> (e.g., !remove 1,2 anime)",
+    'clearqueue': "Usage: !clearqueue <show|movie|anime>"
 }
 
 # Store queue message references for each category
@@ -84,8 +85,8 @@ async def update_queue_embed(category: str = None):
             # Number entries per category while still showing unique id for commands
             lines = []
             for idx, item in enumerate(items, start=1):
-                item_id, title = item[0], item[1]
-                lines.append(f"#{idx} (id {item_id}) - **{title}**")
+                title = item[1]
+                lines.append(f"#{idx} - **{title}**")
             items_text = '\n'.join(lines)
             embed.add_field(name=f"{cat.capitalize()} Requests", value=items_text, inline=False)
         
@@ -176,8 +177,8 @@ async def help(ctx):
     )
 
     embed.add_field(
-        name="!remove <position> <category>",
-        value="Mark an item as completed\n*Example: !remove 1 anime*",
+        name="!remove <positions> <category>",
+        value="Mark one or more items as completed\n*Example: !remove 1,2,3 anime*",
         inline=False
     )
     
@@ -206,6 +207,12 @@ async def helpadmin(ctx):
         value="Reset a queue embed for a specific category\n*Categories: show, movie, anime*\n*Example: !resetqueue show*",
         inline=False
     )
+
+    embed.add_field(
+        name="!clearqueue <category>",
+        value="Clear all pending items in a category\n*Example: !clearqueue anime*",
+        inline=False
+    )
     
     embed.add_field(
         name="!resetallqueues",
@@ -216,10 +223,26 @@ async def helpadmin(ctx):
     await ctx.send(embed=embed)
 
 @bot.command()
-async def remove(ctx, position: int, category: str):
-    """Remove an item from a category queue (completed)"""
-    category = category.lower()
+async def remove(ctx, *, args: str):
+    """Remove one or more items from a category queue (completed)"""
+    if not args:
+        await ctx.send(f"❌ Incorrect usage. {USAGE_MESSAGES['remove']}")
+        return
+    
+    parts = [part.strip() for part in args.replace(',', ' ').split() if part.strip()]
+    if len(parts) < 2:
+        await ctx.send(f"❌ Incorrect usage. {USAGE_MESSAGES['remove']}")
+        return
+    
+    category = parts[-1].lower()
     if category not in VALID_CATEGORIES:
+        await ctx.send(f"❌ Incorrect usage. {USAGE_MESSAGES['remove']}")
+        return
+    
+    position_parts = parts[:-1]
+    try:
+        positions = sorted({int(p) for p in position_parts})
+    except ValueError:
         await ctx.send(f"❌ Incorrect usage. {USAGE_MESSAGES['remove']}")
         return
     
@@ -228,23 +251,40 @@ async def remove(ctx, position: int, category: str):
         await ctx.send(f"❌ The {category} queue is empty.")
         return
     
-    if position < 1 or position > len(items):
-        await ctx.send(f"❌ Could not find position #{position} in the {category} queue.")
+    max_pos = len(items)
+    invalid_positions = [p for p in positions if p < 1 or p > max_pos]
+    if invalid_positions:
+        await ctx.send(f"❌ Positions not found in the {category} queue: {', '.join(map(str, invalid_positions))}")
         return
     
-    item = items[position - 1]
-    item_id, title, _, added_by = item[0], item[1], item[2], item[3]
     is_admin = ctx.author.guild_permissions.administrator
+    user_id = str(ctx.author.id)
     
-    if not is_admin and added_by != str(ctx.author.id):
-        await ctx.send("❌ You can't remove a request that isn't yours.")
-        return
+    # Map positions to items (1-based)
+    selected_items = [(p, items[p - 1]) for p in positions]
     
-    if db.remove_from_queue(item_id):
-        await ctx.send(f"✅ Removed **{title}** from the {category} queue (position #{position}, id {item_id}).")
+    if not is_admin:
+        unauthorized = [p for p, item in selected_items if item[3] != user_id]
+        if unauthorized:
+            await ctx.send("❌ You can't remove a request that isn't yours.")
+            return
+    
+    removed_titles = []
+    failed_positions = []
+    for pos, item in selected_items:
+        item_id, title = item[0], item[1]
+        if db.remove_from_queue(item_id):
+            removed_titles.append((pos, title))
+        else:
+            failed_positions.append(pos)
+    
+    if removed_titles:
+        removed_text = ', '.join([f"#{pos} (**{title}**)" for pos, title in removed_titles])
+        await ctx.send(f"✅ Removed {removed_text} from the {category} queue.")
         await update_queue_embed(category)
-    else:
-        await ctx.send(f"❌ Could not remove that item.")
+    
+    if failed_positions:
+        await ctx.send(f"❌ Could not remove positions: {', '.join(map(str, failed_positions))}")
 
 @bot.command()
 @commands.has_permissions(administrator=True)
@@ -270,8 +310,6 @@ async def setupqueue(ctx, category: str):
         f.write(f'\nQUEUE_{category.upper()}_CHANNEL_ID={ctx.channel.id}\n')
         f.write(f'QUEUE_{category.upper()}_MESSAGE_ID={queue_messages[category].id}\n')
     
-    await ctx.send(f"✅ {category.capitalize()} queue embed created!")
-
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def setrequestschannel(ctx):
@@ -308,6 +346,22 @@ async def resetqueue(ctx, category: str):
         pass
     
     await ctx.send(f"✅ {category.capitalize()} queue embed reset! Run `!setupqueue {category}` in the new channel.")
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def clearqueue(ctx, category: str):
+    """Clear all pending items in a category queue (owner only)"""
+    category = category.lower()
+    if category not in VALID_CATEGORIES:
+        await ctx.send(f"❌ Incorrect usage. {USAGE_MESSAGES['clearqueue']}")
+        return
+    
+    cleared = db.clear_queue(category)
+    if cleared == 0:
+        await ctx.send(f"ℹ️ The {category} queue is already empty.")
+    else:
+        await ctx.send(f"✅ Cleared {cleared} item(s) from the {category} queue.")
+    await update_queue_embed(category)
 
 @bot.command()
 @commands.has_permissions(administrator=True)
