@@ -27,7 +27,10 @@ USAGE_MESSAGES = {
     'clearqueue': "Usage: !clearqueue <show|movie|anime>",
     'refresh': "Usage: !refresh [show|movie|anime]",
     'setcommandautodelete': "Usage: !setcommandautodelete <on|off>",
-    'setdevchannel': "Usage: !setdevchannel [on|off]"
+    'setdevchannel': "Usage: !setdevchannel [on|off]",
+    'setstatus': "Usage: !setstatus <position> <show|movie|anime> <note>",
+    'delstatus': "Usage: !delstatus <position> <show|movie|anime>",
+    'toggledl': "Usage: !toggledl <position> <show|movie|anime>"
 }
 
 # Store queue message references for each category
@@ -121,13 +124,37 @@ async def update_queue_embed(category: str = None):
         if not items:
             embed.description = "The queue is empty!"
         else:
-            # Number entries per category while still showing unique id for commands
+            downloading = [item for item in items if item[-1] == 1]
+            pending = [item for item in items if item[-1] == 0]
+            
             lines = []
-            for idx, item in enumerate(items, start=1):
-                title = item[1]
-                lines.append(f"#{idx} - **{title}**")
+            counter = 1
+            
+            if downloading:
+                lines.append("Downloading...")
+                for item in downloading:
+                    title = item[1]
+                    note = item[6] if item[6] else ""
+                    suffix = f" - _{note}_" if note else ""
+                    lines.append(f"#{counter} - **{title}**{suffix}")
+                    counter += 1
+            
+            if pending:
+                lines.append("Pending...")
+                for item in pending:
+                    title = item[1]
+                    note = item[6] if item[6] else ""
+                    suffix = f" - _{note}_" if note else ""
+                    lines.append(f"#{counter} - **{title}**{suffix}")
+                    counter += 1
+            
+            # Add counts
+            lines.append(f"{len(downloading)} downloading")
+            lines.append("")
+            lines.append(f"{len(pending)} pending")
+            
             items_text = '\n'.join(lines)
-            embed.add_field(name=f"{cat.capitalize()} Requests", value=items_text, inline=False)
+            embed.description = items_text
         
         stats = db.get_queue_stats()
         cat_count = stats.get('by_category', {}).get(cat, 0)
@@ -138,6 +165,17 @@ async def update_queue_embed(category: str = None):
                 await queue_messages[cat].edit(embed=embed)
         except:
             pass
+
+def get_category_items(category: str):
+    """Return ordered active items (downloading first) for a category"""
+    return db.get_queue(category)
+
+def get_item_by_position(category: str, position: int):
+    """Get queue item tuple by visible position number"""
+    items = get_category_items(category)
+    if position < 1 or position > len(items):
+        return None, items
+    return items[position - 1], items
 
 @bot.event
 async def on_message(message):
@@ -297,6 +335,24 @@ async def helpadmin(ctx):
         value="Delete successful commands in this channel instead of reacting\n*Example: !setcommandautodelete on*",
         inline=False
     )
+
+    embed.add_field(
+        name="!setstatus <pos> <category> <note>",
+        value="Add or overwrite a status note on a queue entry\n*Example: !setstatus 5 anime only the first x episodes so far*",
+        inline=False
+    )
+
+    embed.add_field(
+        name="!delstatus <pos> <category>",
+        value="Remove a status note from a queue entry\n*Example: !delstatus 5 anime*",
+        inline=False
+    )
+
+    embed.add_field(
+        name="!toggledl <pos> <category>",
+        value="Move an entry between downloading and pending\n*Example: !toggledl 4 show*",
+        inline=False
+    )
     
     await ctx.send(embed=embed)
 
@@ -363,6 +419,84 @@ async def remove(ctx, *, args: str):
     
     if failed_positions:
         await ctx.send(f"❌ Could not remove positions: {', '.join(map(str, failed_positions))}")
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def setstatus(ctx, position: int = None, category: str = None, *, note: str = None):
+    """Add or overwrite a status note on a queue entry"""
+    if position is None or category is None or note is None:
+        await ctx.send(f"❌ Incorrect usage. {USAGE_MESSAGES['setstatus']}")
+        return
+    
+    category = category.lower()
+    if category not in VALID_CATEGORIES:
+        await ctx.send(f"❌ Incorrect usage. {USAGE_MESSAGES['setstatus']}")
+        return
+    
+    item, items = get_item_by_position(category, position)
+    if not item:
+        await ctx.send(f"❌ Position not found. {USAGE_MESSAGES['setstatus']}")
+        return
+    
+    updated = db.set_status_note(item[0], note)
+    if not updated:
+        await ctx.send("❌ Could not update status for that entry.")
+        return
+    
+    await acknowledge_command(ctx)
+    await update_queue_embed(category)
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def delstatus(ctx, position: int = None, category: str = None):
+    """Remove a status note from a queue entry"""
+    if position is None or category is None:
+        await ctx.send(f"❌ Incorrect usage. {USAGE_MESSAGES['delstatus']}")
+        return
+    
+    category = category.lower()
+    if category not in VALID_CATEGORIES:
+        await ctx.send(f"❌ Incorrect usage. {USAGE_MESSAGES['delstatus']}")
+        return
+    
+    item, items = get_item_by_position(category, position)
+    if not item:
+        await ctx.send(f"❌ Position not found. {USAGE_MESSAGES['delstatus']}")
+        return
+    
+    cleared = db.clear_status_note(item[0])
+    if not cleared:
+        await ctx.send("❌ Could not clear status for that entry.")
+        return
+    
+    await acknowledge_command(ctx)
+    await update_queue_embed(category)
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def toggledl(ctx, position: int = None, category: str = None):
+    """Toggle a queue entry between downloading and pending"""
+    if position is None or category is None:
+        await ctx.send(f"❌ Incorrect usage. {USAGE_MESSAGES['toggledl']}")
+        return
+    
+    category = category.lower()
+    if category not in VALID_CATEGORIES:
+        await ctx.send(f"❌ Incorrect usage. {USAGE_MESSAGES['toggledl']}")
+        return
+    
+    item, items = get_item_by_position(category, position)
+    if not item:
+        await ctx.send(f"❌ Position not found. {USAGE_MESSAGES['toggledl']}")
+        return
+    
+    success = db.toggle_downloading(item[0])
+    if not success:
+        await ctx.send("❌ Could not toggle downloading for that entry.")
+        return
+    
+    await acknowledge_command(ctx)
+    await update_queue_embed(category)
 
 @bot.command()
 @commands.has_permissions(administrator=True)

@@ -21,7 +21,9 @@ class QueueDatabase:
                 category TEXT NOT NULL,
                 added_by TEXT NOT NULL,
                 added_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                status TEXT DEFAULT 'pending'
+                status TEXT DEFAULT 'pending',
+                status_note TEXT DEFAULT '',
+                is_downloading INTEGER DEFAULT 0
             )
         ''')
         
@@ -36,7 +38,20 @@ class QueueDatabase:
         ''')
         
         conn.commit()
+
+        # Backfill missing columns for existing databases
+        self._ensure_column(cursor, 'queue', 'status_note', "TEXT DEFAULT ''")
+        self._ensure_column(cursor, 'queue', 'is_downloading', "INTEGER DEFAULT 0")
+
+        conn.commit()
         conn.close()
+
+    def _ensure_column(self, cursor, table: str, column: str, definition: str):
+        """Add a column if it doesn't already exist (SQLite)"""
+        cursor.execute(f"PRAGMA table_info({table})")
+        columns = [row[1] for row in cursor.fetchall()]
+        if column not in columns:
+            cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
     
     def add_to_queue(self, title: str, category: str, user_id: str, username: str) -> int:
         """Add an item to the queue and return the item ID"""
@@ -68,24 +83,24 @@ class QueueDatabase:
             return None
     
     def get_queue(self, category: str = None) -> List[Tuple]:
-        """Get all items from the queue, optionally filtered by category"""
+        """Get all non-completed items from the queue, optionally filtered by category"""
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
             if category:
                 cursor.execute('''
-                    SELECT id, title, category, added_by, added_date, status
+                    SELECT id, title, category, added_by, added_date, status, status_note, is_downloading
                     FROM queue
                     WHERE status = 'pending' AND category = ?
-                    ORDER BY added_date
+                    ORDER BY is_downloading DESC, added_date
                 ''', (category,))
             else:
                 cursor.execute('''
-                    SELECT id, title, category, added_by, added_date, status
+                    SELECT id, title, category, added_by, added_date, status, status_note, is_downloading
                     FROM queue
                     WHERE status = 'pending'
-                    ORDER BY added_date
+                    ORDER BY is_downloading DESC, added_date
                 ''')
             
             results = cursor.fetchall()
@@ -141,7 +156,7 @@ class QueueDatabase:
             cursor = conn.cursor()
             
             cursor.execute('''
-                SELECT id, title, category, added_by, status
+                SELECT id, title, category, added_by, status, status_note, is_downloading
                 FROM queue
                 WHERE id = ?
             ''', (item_id,))
@@ -241,3 +256,60 @@ class QueueDatabase:
         except Exception as e:
             print(f"Error getting queue stats: {e}")
             return {}
+
+    def set_status_note(self, item_id: int, note: str) -> bool:
+        """Set or overwrite a status note for an item"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                UPDATE queue
+                SET status_note = ?
+                WHERE id = ? AND status = 'pending'
+            ''', (note, item_id))
+            
+            conn.commit()
+            conn.close()
+            return cursor.rowcount > 0
+        except Exception as e:
+            print(f"Error setting status note: {e}")
+            return False
+
+    def clear_status_note(self, item_id: int) -> bool:
+        """Clear a status note for an item"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                UPDATE queue
+                SET status_note = ''
+                WHERE id = ? AND status = 'pending'
+            ''', (item_id,))
+            
+            conn.commit()
+            conn.close()
+            return cursor.rowcount > 0
+        except Exception as e:
+            print(f"Error clearing status note: {e}")
+            return False
+
+    def toggle_downloading(self, item_id: int) -> bool:
+        """Toggle the downloading flag for an item"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                UPDATE queue
+                SET is_downloading = CASE WHEN is_downloading = 1 THEN 0 ELSE 1 END
+                WHERE id = ? AND status = 'pending'
+            ''', (item_id,))
+            
+            conn.commit()
+            conn.close()
+            return cursor.rowcount > 0
+        except Exception as e:
+            print(f"Error toggling downloading: {e}")
+            return False
