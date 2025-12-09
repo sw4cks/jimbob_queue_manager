@@ -131,7 +131,7 @@ async def update_queue_embed(category: str = None):
             counter = 1
             
             if downloading:
-                lines.append("Downloading...")
+                lines.append("__**Downloading...**__")
                 for item in downloading:
                     title = item[1]
                     note = item[6] if item[6] else ""
@@ -140,7 +140,7 @@ async def update_queue_embed(category: str = None):
                     counter += 1
             
             if pending:
-                lines.append("Pending...")
+                lines.append("__**Pending...**__")
                 for item in pending:
                     title = item[1]
                     note = item[6] if item[6] else ""
@@ -148,17 +148,16 @@ async def update_queue_embed(category: str = None):
                     lines.append(f"#{counter} - **{title}**{suffix}")
                     counter += 1
             
-            # Add counts
-            lines.append(f"{len(downloading)} downloading")
-            lines.append("")
-            lines.append(f"{len(pending)} pending")
-            
             items_text = '\n'.join(lines)
             embed.description = items_text
         
-        stats = db.get_queue_stats()
-        cat_count = stats.get('by_category', {}).get(cat, 0)
-        embed.set_footer(text=f"{cat_count} pending")
+        pending_count = len([item for item in items if item[-1] == 0])
+        downloading_count = len([item for item in items if item[-1] == 1])
+        if downloading_count > 0:
+            footer_text = f"{pending_count} pending · {downloading_count} downloading"
+        else:
+            footer_text = f"{pending_count} pending"
+        embed.set_footer(text=footer_text)
         
         try:
             if queue_messages[cat]:
