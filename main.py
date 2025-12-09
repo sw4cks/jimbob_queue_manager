@@ -21,7 +21,7 @@ VALID_CATEGORIES = {'show', 'movie', 'anime'}
 USAGE_MESSAGES = {
     'setupqueue': "Usage: !setupqueue <show|movie|anime>",
     'resetqueue': "Usage: !resetqueue <show|movie|anime>",
-    'remove': "Usage: !remove <id>"
+    'remove': "Usage: !remove <position> <show|movie|anime>"
 }
 
 # Store queue message references for each category
@@ -81,7 +81,12 @@ async def update_queue_embed(category: str = None):
         if not items:
             embed.description = "The queue is empty!"
         else:
-            items_text = '\n'.join([f"#{item[0]} - **{item[1]}**" for item in items])
+            # Number entries per category while still showing unique id for commands
+            lines = []
+            for idx, item in enumerate(items, start=1):
+                item_id, title = item[0], item[1]
+                lines.append(f"#{idx} (id {item_id}) - **{title}**")
+            items_text = '\n'.join(lines)
             embed.add_field(name=f"{cat.capitalize()} Requests", value=items_text, inline=False)
         
         stats = db.get_queue_stats()
@@ -133,7 +138,7 @@ async def on_command_error(ctx, error):
         if usage:
             await ctx.send(f"❌ Incorrect usage. {usage}")
             return
-    if isinstance(error, commands.BadArgument):
+    if isinstance(error, (commands.BadArgument, commands.TooManyArguments)):
         if usage:
             await ctx.send(f"❌ Incorrect usage. {usage}")
             return
@@ -171,8 +176,8 @@ async def help(ctx):
     )
 
     embed.add_field(
-        name="!remove <id>",
-        value="Mark an item as completed\n*Example: !remove 5*",
+        name="!remove <position> <category>",
+        value="Mark an item as completed\n*Example: !remove 1 anime*",
         inline=False
     )
     
@@ -211,14 +216,24 @@ async def helpadmin(ctx):
     await ctx.send(embed=embed)
 
 @bot.command()
-async def remove(ctx, item_id: int):
-    """Remove an item from the queue (completed)"""
-    item = db.get_item(item_id)
-    if not item:
-        await ctx.send(f"❌ Could not find item #{item_id}")
+async def remove(ctx, position: int, category: str):
+    """Remove an item from a category queue (completed)"""
+    category = category.lower()
+    if category not in VALID_CATEGORIES:
+        await ctx.send(f"❌ Incorrect usage. {USAGE_MESSAGES['remove']}")
         return
     
-    added_by = item[3]
+    items = db.get_queue(category)
+    if not items:
+        await ctx.send(f"❌ The {category} queue is empty.")
+        return
+    
+    if position < 1 or position > len(items):
+        await ctx.send(f"❌ Could not find position #{position} in the {category} queue.")
+        return
+    
+    item = items[position - 1]
+    item_id, title, _, added_by = item[0], item[1], item[2], item[3]
     is_admin = ctx.author.guild_permissions.administrator
     
     if not is_admin and added_by != str(ctx.author.id):
@@ -226,10 +241,10 @@ async def remove(ctx, item_id: int):
         return
     
     if db.remove_from_queue(item_id):
-        await ctx.send(f"✅ Item #{item_id} marked as completed!")
-        await update_queue_embed()
+        await ctx.send(f"✅ Removed **{title}** from the {category} queue (position #{position}, id {item_id}).")
+        await update_queue_embed(category)
     else:
-        await ctx.send(f"❌ Could not remove item #{item_id}")
+        await ctx.send(f"❌ Could not remove that item.")
 
 @bot.command()
 @commands.has_permissions(administrator=True)
