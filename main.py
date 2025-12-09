@@ -116,17 +116,26 @@ async def on_message(message):
     if '(show)' in content:
         text_before = message.content[:message.content.lower().index('(show)')].strip()
         item_id = db.add_to_queue(text_before, 'show', str(message.author.id), message.author.name)
-        await message.channel.send(f'{message.author.mention} has added the show **{text_before}** to the queue!\nNot quite right? Type `!undo` and retry')
+        try:
+            await message.add_reaction("✅")
+        except Exception:
+            pass
         await update_queue_embed('show')
     elif '(movie)' in content:
         text_before = message.content[:message.content.lower().index('(movie)')].strip()
         item_id = db.add_to_queue(text_before, 'movie', str(message.author.id), message.author.name)
-        await message.channel.send(f'{message.author.mention} has added the movie **{text_before}** to the queue!\nNot quite right? Type `!undo` and retry')
+        try:
+            await message.add_reaction("✅")
+        except Exception:
+            pass
         await update_queue_embed('movie')
     elif '(anime)' in content:
         text_before = message.content[:message.content.lower().index('(anime)')].strip()
         item_id = db.add_to_queue(text_before, 'anime', str(message.author.id), message.author.name)
-        await message.channel.send(f'{message.author.mention} has added the anime **{text_before}** to the queue!\nNot quite right? Type `!undo` and retry')
+        try:
+            await message.add_reaction("✅")
+        except Exception:
+            pass
         await update_queue_embed('anime')
     await bot.process_commands(message)
 
@@ -154,7 +163,10 @@ async def undo(ctx):
     
     if result:
         item_id, title, category = result
-        await ctx.send(f'✅ Undone! Removed **{title}** ({category}) from the queue.')
+        try:
+            await ctx.message.add_reaction("✅")
+        except Exception:
+            pass
         await update_queue_embed(category)
     else:
         await ctx.send(f"❌ Nothing to undo! You haven't added anything to the queue yet.")
@@ -279,8 +291,10 @@ async def remove(ctx, *, args: str):
             failed_positions.append(pos)
     
     if removed_titles:
-        removed_text = ', '.join([f"#{pos} (**{title}**)" for pos, title in removed_titles])
-        await ctx.send(f"✅ Removed {removed_text} from the {category} queue.")
+        try:
+            await ctx.message.add_reaction("✅")
+        except Exception:
+            pass
         await update_queue_embed(category)
     
     if failed_positions:
