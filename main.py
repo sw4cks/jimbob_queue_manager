@@ -12,6 +12,8 @@ token = os.getenv('DISCORD_TOKEN')
 queue_channel_id = os.getenv('QUEUE_CHANNEL_ID')
 queue_message_id = os.getenv('QUEUE_MESSAGE_ID')
 requests_channel_id = os.getenv('REQUESTS_CHANNEL_ID')
+dev_channel_ids = set([cid.strip() for cid in os.getenv('DEV_CHANNEL_IDS', '').split(',') if cid.strip()])
+auto_delete_channels = set([cid.strip() for cid in os.getenv('AUTO_DELETE_CHANNEL_IDS', '').split(',') if cid.strip()])
 db = QueueDatabase()
 
 # Single embed color used across all bot messages
@@ -22,7 +24,10 @@ USAGE_MESSAGES = {
     'setupqueue': "Usage: !setupqueue <show|movie|anime>",
     'resetqueue': "Usage: !resetqueue <show|movie|anime>",
     'remove': "Usage: !remove <positions> <show|movie|anime> (e.g., !remove 1,2 anime)",
-    'clearqueue': "Usage: !clearqueue <show|movie|anime>"
+    'clearqueue': "Usage: !clearqueue <show|movie|anime>",
+    'refresh': "Usage: !refresh [show|movie|anime]",
+    'setcommandautodelete': "Usage: !setcommandautodelete <on|off>",
+    'setdevchannel': "Usage: !setdevchannel [on|off]"
 }
 
 # Store queue message references for each category
@@ -36,6 +41,40 @@ queue_channels = {
     'movie': None,
     'anime': None
 }
+
+def update_env_value(key: str, value: str):
+    """Write or replace a single key=value pair inside .env"""
+    try:
+        existing_lines = []
+        if os.path.exists('.env'):
+            with open('.env', 'r') as f:
+                existing_lines = f.readlines()
+        
+        with open('.env', 'w') as f:
+            prefix = f"{key}="
+            for line in existing_lines:
+                if not line.startswith(prefix):
+                    f.write(line)
+            f.write(f"{key}={value}\n")
+    except Exception as e:
+        print(f"Error updating {key} in .env: {e}")
+
+def serialize_id_set(values: set) -> str:
+    """Serialize a set of string ids into a stable, comma-separated list"""
+    return ','.join(sorted(values))
+
+async def acknowledge_command(ctx):
+    """Handle command acknowledgements, respecting auto-delete channels"""
+    if str(ctx.channel.id) in auto_delete_channels:
+        try:
+            await ctx.message.delete()
+        except Exception:
+            pass
+    else:
+        try:
+            await ctx.message.add_reaction("✅")
+        except Exception:
+            pass
 
 handler = logging.FileHandler(filename='discord.log', encoding='utf-8', mode='w')
 intents = discord.Intents.default()
@@ -106,7 +145,10 @@ async def on_message(message):
         return
     
     # Only process requests in the designated channel (if set)
-    if requests_channel_id and message.channel.id != int(requests_channel_id):
+    allowed_channels = set(dev_channel_ids)
+    if requests_channel_id:
+        allowed_channels.add(str(requests_channel_id))
+    if requests_channel_id and str(message.channel.id) not in allowed_channels:
         # Still process commands in any channel
         await bot.process_commands(message)
         return
@@ -156,6 +198,15 @@ async def on_command_error(ctx, error):
     # Re-raise unhandled errors so they don't fail silently
     raise error
 
+@bot.event
+async def on_command_completion(ctx):
+    """Clean up commands in auto-delete channels after successful execution"""
+    if str(ctx.channel.id) in auto_delete_channels:
+        try:
+            await ctx.message.delete()
+        except Exception:
+            pass
+
 @bot.command()
 async def undo(ctx):
     """Undo your last queue entry"""
@@ -163,13 +214,10 @@ async def undo(ctx):
     
     if result:
         item_id, title, category = result
-        try:
-            await ctx.message.add_reaction("✅")
-        except Exception:
-            pass
+        await acknowledge_command(ctx)
         await update_queue_embed(category)
     else:
-        await ctx.send(f"❌ Nothing to undo! You haven't added anything to the queue yet.")
+        await ctx.send(f"ƒ?O Nothing to undo! You haven't added anything to the queue yet.")
 
 @bot.command()
 async def help(ctx):
@@ -229,6 +277,24 @@ async def helpadmin(ctx):
     embed.add_field(
         name="!resetallqueues",
         value="Reset all queue embeds at once\n*Example: !resetallqueues*",
+        inline=False
+    )
+
+    embed.add_field(
+        name="!refresh [category]",
+        value="Manually refresh queue embeds\n*Example: !refresh show*",
+        inline=False
+    )
+
+    embed.add_field(
+        name="!setdevchannel [on|off]",
+        value="Allow this channel to accept requests alongside the primary requests channel\n*Example: !setdevchannel*",
+        inline=False
+    )
+
+    embed.add_field(
+        name="!setcommandautodelete [on|off]",
+        value="Delete successful commands in this channel instead of reacting\n*Example: !setcommandautodelete on*",
         inline=False
     )
     
@@ -291,11 +357,9 @@ async def remove(ctx, *, args: str):
             failed_positions.append(pos)
     
     if removed_titles:
-        try:
-            await ctx.message.add_reaction("✅")
-        except Exception:
-            pass
+        await acknowledge_command(ctx)
         await update_queue_embed(category)
+
     
     if failed_positions:
         await ctx.send(f"❌ Could not remove positions: {', '.join(map(str, failed_positions))}")
@@ -331,19 +395,7 @@ async def setrequestschannel(ctx):
     global requests_channel_id
     requests_channel_id = str(ctx.channel.id)
     
-    # Replace any existing setting in .env
-    try:
-        with open('.env', 'r') as f:
-            lines = f.readlines()
-        
-        with open('.env', 'w') as f:
-            for line in lines:
-                if not line.startswith('REQUESTS_CHANNEL_ID='):
-                    f.write(line)
-            f.write(f'REQUESTS_CHANNEL_ID={requests_channel_id}\n')
-    except FileNotFoundError:
-        with open('.env', 'w') as f:
-            f.write(f'REQUESTS_CHANNEL_ID={requests_channel_id}\n')
+    update_env_value('REQUESTS_CHANNEL_ID', requests_channel_id)
     
     await ctx.send(f"✅ Requests channel set to {ctx.channel.mention}.\nOnly messages in this channel will be processed for queue requests.")
 
@@ -416,6 +468,84 @@ async def resetallqueues(ctx):
     await ctx.send("✅ All queue embeds reset! Run `!setupqueue show`, `!setupqueue movie`, and `!setupqueue anime` in your desired channels.")
 
 
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def refresh(ctx, category: str = None):
+    """Manually refresh queue embeds for all or one category (admin only)"""
+    if category:
+        category = category.lower()
+        if category not in VALID_CATEGORIES:
+            await ctx.send(f"\u274c Incorrect usage. {USAGE_MESSAGES['refresh']}")
+            return
+    await update_queue_embed(category)
+    await acknowledge_command(ctx)
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def setdevchannel(ctx, state: str = "on"):
+    """Allow or block this channel as an additional requests channel (admin only)"""
+    global dev_channel_ids
+    
+    channel_id = str(ctx.channel.id)
+    state = state.lower()
+    
+    if state in ['off', 'disable', 'disabled']:
+        if channel_id in dev_channel_ids:
+            dev_channel_ids.remove(channel_id)
+            update_env_value('DEV_CHANNEL_IDS', serialize_id_set(dev_channel_ids))
+            await ctx.send(f"\u2705 {ctx.channel.mention} is no longer a requests override channel.")
+        else:
+            await ctx.send("\u274c This channel is not currently enabled as a requests override.")
+        return
+    
+    if state not in ['on', 'enable', 'enabled']:
+        await ctx.send(f"\u274c Incorrect usage. {USAGE_MESSAGES['setdevchannel']}")
+        return
+    
+    if channel_id in dev_channel_ids:
+        await ctx.send("\u274c This channel is already enabled as a requests override.")
+        return
+    
+    dev_channel_ids.add(channel_id)
+    update_env_value('DEV_CHANNEL_IDS', serialize_id_set(dev_channel_ids))
+    await ctx.send(f"\u2705 {ctx.channel.mention} can now accept queue requests alongside the main requests channel.")
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def setcommandautodelete(ctx, state: str = "on"):
+    """Toggle auto-deleting successful commands in this channel (admin only)"""
+    global auto_delete_channels
+    
+    channel_id = str(ctx.channel.id)
+    state = state.lower()
+    should_cleanup = channel_id in auto_delete_channels
+    
+    if state in ['off', 'disable', 'disabled']:
+        if channel_id in auto_delete_channels:
+            auto_delete_channels.remove(channel_id)
+            update_env_value('AUTO_DELETE_CHANNEL_IDS', serialize_id_set(auto_delete_channels))
+            await ctx.send(f"\u2705 Auto-delete for commands disabled in {ctx.channel.mention}.")
+            if should_cleanup:
+                try:
+                    await ctx.message.delete()
+                except Exception:
+                    pass
+        else:
+            await ctx.send("\u274c Auto-delete is not enabled for this channel.")
+        return
+    
+    if state not in ['on', 'enable', 'enabled']:
+        await ctx.send(f"\u274c Incorrect usage. {USAGE_MESSAGES['setcommandautodelete']}")
+        return
+    
+    if channel_id in auto_delete_channels:
+        await ctx.send("\u274c Auto-delete is already enabled for this channel.")
+        return
+    
+    auto_delete_channels.add(channel_id)
+    update_env_value('AUTO_DELETE_CHANNEL_IDS', serialize_id_set(auto_delete_channels))
+    await ctx.send(f"\u2705 Successful commands in {ctx.channel.mention} will now be deleted.")
 
 async def listen_for_input():
     loop = asyncio.get_event_loop()
