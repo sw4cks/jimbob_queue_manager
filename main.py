@@ -262,20 +262,14 @@ async def help(ctx):
     embed = discord.Embed(title="📋 Queue Manager Commands", color=EMBED_COLOR)
     
     embed.add_field(
-        name="Add Requests",
+        name="__**Add Requests**__",
         value="**Text (show)** - Add a show to the queue\n*Example: Breaking Bad (show)*\n\n**Text (movie)** - Add a movie to the queue\n*Example: The Matrix (movie)*\n\n**Text (anime)** - Add an anime to the queue\n*Example: Death Note (anime)*",
         inline=False
     )
     
     embed.add_field(
-        name="!undo",
-        value="Remove your last added request\n*Example: !undo*",
-        inline=False
-    )
-
-    embed.add_field(
-        name="!remove <positions> <category>",
-        value="Mark one or more items as completed\n*Example: !remove 1,2,3 anime*",
+        name="__**Manage Your Requests**__",
+        value="**!undo** - Remove your last added request\n*Example: !undo*\n\n**!remove <positions> <category>** - Mark one or more items as completed\n*Example: !remove 1,2,3 anime*",
         inline=False
     )
     
@@ -288,68 +282,20 @@ async def helpadmin(ctx):
     embed = discord.Embed(title="🔧 Admin Commands", color=EMBED_COLOR)
     
     embed.add_field(
-        name="!setupqueue <category>",
-        value="Setup a persistent queue embed for a category\n*Categories: show, movie, anime*\n*Example: !setupqueue show*",
+        name="__**Setup & Channels**__",
+        value="**!setupqueue <category>** - Create a queue embed in this channel\n**!setrequestschannel** - Set channel for user submissions\n**!setdevchannel [on|off]** - Allow/deny this channel as an extra requests channel\n**!setcommandautodelete [on|off]** - Auto-delete successful commands here",
         inline=False
     )
     
     embed.add_field(
-        name="!setrequestschannel",
-        value="Set the channel where users can add requests\n*Example: !setrequestschannel*",
-        inline=False
-    )
-    
-    embed.add_field(
-        name="!resetqueue <category>",
-        value="Reset a queue embed for a specific category\n*Categories: show, movie, anime*\n*Example: !resetqueue show*",
+        name="__**Queue Control**__",
+        value="**!resetqueue <category>** - Reset a queue embed\n**!clearqueue <category>** - Clear all pending items\n**!resetallqueues** - Reset all queue embeds\n**!refresh [category]** - Manually refresh embeds",
         inline=False
     )
 
     embed.add_field(
-        name="!clearqueue <category>",
-        value="Clear all pending items in a category\n*Example: !clearqueue anime*",
-        inline=False
-    )
-    
-    embed.add_field(
-        name="!resetallqueues",
-        value="Reset all queue embeds at once\n*Example: !resetallqueues*",
-        inline=False
-    )
-
-    embed.add_field(
-        name="!refresh [category]",
-        value="Manually refresh queue embeds\n*Example: !refresh show*",
-        inline=False
-    )
-
-    embed.add_field(
-        name="!setdevchannel [on|off]",
-        value="Allow this channel to accept requests alongside the primary requests channel\n*Example: !setdevchannel*",
-        inline=False
-    )
-
-    embed.add_field(
-        name="!setcommandautodelete [on|off]",
-        value="Delete successful commands in this channel instead of reacting\n*Example: !setcommandautodelete on*",
-        inline=False
-    )
-
-    embed.add_field(
-        name="!setstatus <pos> <category> <note>",
-        value="Add or overwrite a status note on a queue entry\n*Example: !setstatus 5 anime only the first x episodes so far*",
-        inline=False
-    )
-
-    embed.add_field(
-        name="!delstatus <pos> <category>",
-        value="Remove a status note from a queue entry\n*Example: !delstatus 5 anime*",
-        inline=False
-    )
-
-    embed.add_field(
-        name="!toggledl <pos> <category>",
-        value="Move an entry between downloading and pending\n*Example: !toggledl 4 show*",
+        name="__**Statuses & Downloading**__",
+        value="**!setstatus <pos> <category> <note>** - Add or overwrite a status note\n**!delstatus <pos> <category>** - Remove a status note\n**!toggledl <pos> <category>** - Move an entry between downloading/pending",
         inline=False
     )
     
