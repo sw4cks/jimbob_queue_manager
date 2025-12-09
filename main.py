@@ -314,10 +314,24 @@ async def setupqueue(ctx, category: str):
 @commands.has_permissions(administrator=True)
 async def setrequestschannel(ctx):
     """Set the channel where queue requests are accepted (owner only)"""
-    with open('.env', 'a') as f:
-        f.write(f'\nREQUESTS_CHANNEL_ID={ctx.channel.id}\n')
+    global requests_channel_id
+    requests_channel_id = str(ctx.channel.id)
     
-    await ctx.send(f"✅ Requests channel set to {ctx.channel.mention}!\nOnly messages in this channel will be processed for queue requests.")
+    # Replace any existing setting in .env
+    try:
+        with open('.env', 'r') as f:
+            lines = f.readlines()
+        
+        with open('.env', 'w') as f:
+            for line in lines:
+                if not line.startswith('REQUESTS_CHANNEL_ID='):
+                    f.write(line)
+            f.write(f'REQUESTS_CHANNEL_ID={requests_channel_id}\n')
+    except FileNotFoundError:
+        with open('.env', 'w') as f:
+            f.write(f'REQUESTS_CHANNEL_ID={requests_channel_id}\n')
+    
+    await ctx.send(f"✅ Requests channel set to {ctx.channel.mention}.\nOnly messages in this channel will be processed for queue requests.")
 
 @bot.command()
 @commands.has_permissions(administrator=True)
