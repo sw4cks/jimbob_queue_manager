@@ -158,7 +158,7 @@ async def update_queue_embed(category: str = None):
         
         stats = db.get_queue_stats()
         cat_count = stats.get('by_category', {}).get(cat, 0)
-        embed.set_footer(text=f"Total: {cat_count} pending")
+        embed.set_footer(text=f"{cat_count} pending")
         
         try:
             if queue_messages[cat]:
