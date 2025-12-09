@@ -14,6 +14,9 @@ queue_message_id = os.getenv('QUEUE_MESSAGE_ID')
 requests_channel_id = os.getenv('REQUESTS_CHANNEL_ID')
 db = QueueDatabase()
 
+# Single embed color used across all bot messages
+EMBED_COLOR = discord.Color(0xffc100)
+
 # Store queue message references for each category
 queue_messages = {
     'show': None,
@@ -65,7 +68,7 @@ async def update_queue_embed(category: str = None):
         
         items = db.get_queue(cat)
         
-        embed = discord.Embed(title=f"📺 {cat.capitalize()} Queue", color=discord.Color.blue())
+        embed = discord.Embed(title=f"📺 {cat.capitalize()} Queue", color=EMBED_COLOR)
         
         if not items:
             embed.description = "The queue is empty!"
@@ -128,7 +131,7 @@ async def undo(ctx):
 @bot.command()
 async def help(ctx):
     """Display available user commands"""
-    embed = discord.Embed(title="📋 Queue Manager Commands", color=discord.Color.blue())
+    embed = discord.Embed(title="📋 Queue Manager Commands", color=EMBED_COLOR)
     
     embed.add_field(
         name="Add Requests",
@@ -160,7 +163,7 @@ async def help(ctx):
 @commands.has_permissions(administrator=True)
 async def helpadmin(ctx):
     """Display available admin commands"""
-    embed = discord.Embed(title="🔧 Admin Commands", color=discord.Color.red())
+    embed = discord.Embed(title="🔧 Admin Commands", color=EMBED_COLOR)
     
     embed.add_field(
         name="!setupqueue <category>",
@@ -191,7 +194,7 @@ async def helpadmin(ctx):
     stats = db.get_queue_stats()
     user_stats = db.get_user_stats(str(ctx.author.id))
     
-    embed = discord.Embed(title="📊 Queue Statistics", color=discord.Color.green())
+    embed = discord.Embed(title="📊 Queue Statistics", color=EMBED_COLOR)
     embed.add_field(name="Pending Items", value=stats.get('pending', 0), inline=True)
     embed.add_field(name="Completed Items", value=stats.get('completed', 0), inline=True)
     
@@ -226,7 +229,7 @@ async def setupqueue(ctx, category: str):
     
     queue_channels[category] = ctx.channel
     
-    embed = discord.Embed(title=f"📺 {category.capitalize()} Queue", color=discord.Color.blue())
+    embed = discord.Embed(title=f"📺 {category.capitalize()} Queue", color=EMBED_COLOR)
     embed.description = "The queue is empty!"
     embed.set_footer(text="Total: 0 pending")
     
