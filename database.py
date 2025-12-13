@@ -7,7 +7,18 @@ class QueueDatabase:
     def __init__(self, db_path: str = 'queue.db'):
         self.db_path = db_path
         self.init_database()
-    
+
+    def _vacuum_safe(self):
+        """Attempt to reclaim space; ignore failures so callers can proceed."""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute('VACUUM')
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            print(f"VACUUM failed: {e}")
+
     def init_database(self):
         """Initialize the database with required tables"""
         conn = sqlite3.connect(self.db_path)
@@ -53,31 +64,46 @@ class QueueDatabase:
         if column not in columns:
             cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
     
+    def _insert_queue_row(self, title: str, category: str, user_id: str, username: str) -> int:
+        """Shared insert logic so we can retry on disk-full errors."""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        cursor.execute('''
+            INSERT INTO queue (title, category, added_by)
+            VALUES (?, ?, ?)
+        ''', (title, category, user_id))
+        
+        item_id = cursor.lastrowid
+        
+        cursor.execute('''
+            INSERT INTO users (user_id, username, items_added, last_added)
+            VALUES (?, ?, 1, CURRENT_TIMESTAMP)
+            ON CONFLICT(user_id) DO UPDATE SET
+                items_added = items_added + 1,
+                last_added = CURRENT_TIMESTAMP
+        ''', (user_id, username))
+        
+        conn.commit()
+        conn.close()
+        return item_id
+
     def add_to_queue(self, title: str, category: str, user_id: str, username: str) -> int:
-        """Add an item to the queue and return the item ID"""
+        """Add an item to the queue and return the item ID. Retries once after VACUUM on disk-full errors."""
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            cursor.execute('''
-                INSERT INTO queue (title, category, added_by)
-                VALUES (?, ?, ?)
-            ''', (title, category, user_id))
-            
-            item_id = cursor.lastrowid
-            
-            # Update user stats
-            cursor.execute('''
-                INSERT INTO users (user_id, username, items_added, last_added)
-                VALUES (?, ?, 1, CURRENT_TIMESTAMP)
-                ON CONFLICT(user_id) DO UPDATE SET
-                    items_added = items_added + 1,
-                    last_added = CURRENT_TIMESTAMP
-            ''', (user_id, username))
-            
-            conn.commit()
-            conn.close()
-            return item_id
+            return self._insert_queue_row(title, category, user_id, username)
+        except sqlite3.OperationalError as e:
+            # SQLite returns this when the DB file or disk quota is full; try to compact once then retry
+            if "database or disk is full" in str(e).lower():
+                print("Database full; attempting VACUUM and retry...")
+                self._vacuum_safe()
+                try:
+                    return self._insert_queue_row(title, category, user_id, username)
+                except Exception as retry_err:
+                    print(f"Retry after VACUUM failed: {retry_err}")
+                    return None
+            print(f"Error adding to queue: {e}")
+            return None
         except Exception as e:
             print(f"Error adding to queue: {e}")
             return None

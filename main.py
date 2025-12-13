@@ -30,7 +30,7 @@ USAGE_MESSAGES = {
     'setdevchannel': "Usage: !setdevchannel [on|off]",
     'setstatus': "Usage: !setstatus <position> <show|movie|anime> <note>",
     'delstatus': "Usage: !delstatus <position> <show|movie|anime>",
-    'toggledl': "Usage: !toggledl <position> <show|movie|anime>"
+    'toggledl': "Usage: !toggledl <positions> <show|movie|anime> (e.g., !toggledl 1,3 anime)"
 }
 
 # Store queue message references for each category
@@ -269,7 +269,7 @@ async def help(ctx):
     
     embed.add_field(
         name="__**Manage Your Requests**__",
-        value="**!undo** - Remove your last added request\n*Example: !undo*\n\n**!remove <positions> <category>** - Mark one or more items as completed\n*Example: !remove 1,2,3 anime*",
+        value="**!undo** - Remove your last added request\n*Example: !undo*\n\n**!remove <positions> <category>** - Mark one or more items as completed\n*Example: !remove 1,2,3 anime*\n\n**Admins: !toggledl <positions> <category>** - Toggle downloading status for multiple items",
         inline=False
     )
     
@@ -295,7 +295,7 @@ async def helpadmin(ctx):
 
     embed.add_field(
         name="__**Statuses & Downloading**__",
-        value="**!setstatus <pos> <category> <note>** - Add or overwrite a status note\n**!delstatus <pos> <category>** - Remove a status note\n**!toggledl <pos> <category>** - Move an entry between downloading/pending",
+        value="**!setstatus <pos> <category> <note>** - Add or overwrite a status note\n**!delstatus <pos> <category>** - Remove a status note\n**!toggledl <positions> <category>** - Move entries between downloading/pending",
         inline=False
     )
     
@@ -419,29 +419,56 @@ async def delstatus(ctx, position: int = None, category: str = None):
 
 @bot.command()
 @commands.has_permissions(administrator=True)
-async def toggledl(ctx, position: int = None, category: str = None):
-    """Toggle a queue entry between downloading and pending"""
-    if position is None or category is None:
-        await ctx.send(f"❌ Incorrect usage. {USAGE_MESSAGES['toggledl']}")
+async def toggledl(ctx, *, args: str = None):
+    """Toggle one or more queue entries between downloading and pending"""
+    if not args:
+        await ctx.send(f"??? Incorrect usage. {USAGE_MESSAGES['toggledl']}")
         return
     
-    category = category.lower()
+    parts = [part.strip() for part in args.replace(',', ' ').split() if part.strip()]
+    if len(parts) < 2:
+        await ctx.send(f"??? Incorrect usage. {USAGE_MESSAGES['toggledl']}")
+        return
+    
+    category = parts[-1].lower()
     if category not in VALID_CATEGORIES:
-        await ctx.send(f"❌ Incorrect usage. {USAGE_MESSAGES['toggledl']}")
+        await ctx.send(f"??? Incorrect usage. {USAGE_MESSAGES['toggledl']}")
         return
     
-    item, items = get_item_by_position(category, position)
-    if not item:
-        await ctx.send(f"❌ Position not found. {USAGE_MESSAGES['toggledl']}")
+    position_parts = parts[:-1]
+    try:
+        positions = sorted({int(p) for p in position_parts})
+    except ValueError:
+        await ctx.send(f"??? Incorrect usage. {USAGE_MESSAGES['toggledl']}")
         return
     
-    success = db.toggle_downloading(item[0])
-    if not success:
-        await ctx.send("❌ Could not toggle downloading for that entry.")
+    items = db.get_queue(category)
+    if not items:
+        await ctx.send(f"??? The {category} queue is empty.")
         return
     
-    await acknowledge_command(ctx)
-    await update_queue_embed(category)
+    max_pos = len(items)
+    invalid_positions = [p for p in positions if p < 1 or p > max_pos]
+    if invalid_positions:
+        await ctx.send(f"??? Positions not found in the {category} queue: {', '.join(map(str, invalid_positions))}")
+        return
+    
+    toggled_positions = []
+    failed_positions = []
+    for pos in positions:
+        item = items[pos - 1]
+        success = db.toggle_downloading(item[0])
+        if success:
+            toggled_positions.append(pos)
+        else:
+            failed_positions.append(pos)
+    
+    if toggled_positions:
+        await acknowledge_command(ctx)
+        await update_queue_embed(category)
+    
+    if failed_positions:
+        await ctx.send(f"??? Could not toggle positions: {', '.join(map(str, failed_positions))}")
 
 @bot.command()
 @commands.has_permissions(administrator=True)
